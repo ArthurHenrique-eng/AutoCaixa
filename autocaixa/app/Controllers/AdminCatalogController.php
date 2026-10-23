@@ -21,7 +21,7 @@ final class AdminCatalogController
         $user = $this->auth->requireUser('products.manage');
         if ($user === null) return;
         $rows = $this->db->query(
-            'SELECT id, barcode, name, price_cents, stock, min_stock, active FROM products ORDER BY name'
+            'SELECT id, barcode, name, price_cents, stock, reserved_stock, (stock - reserved_stock) AS available_stock, min_stock, active FROM products ORDER BY name'
         )->fetchAll();
         View::render('admin/products', ['user' => $user, 'rows' => $rows]);
     }
@@ -115,16 +115,22 @@ final class AdminCatalogController
 
         $this->db->beginTransaction();
         try {
-            $stmt = $this->db->prepare('SELECT stock FROM products WHERE id = :id FOR UPDATE');
+            $stmt = $this->db->prepare('SELECT stock, reserved_stock FROM products WHERE id = :id FOR UPDATE');
             $stmt->execute([':id' => $id]);
-            $stock = $stmt->fetchColumn();
-            if ($stock === false) {
+            $product = $stmt->fetch();
+            if ($product === false) {
                 $this->db->rollBack();
                 { $this->back('error', 'Produto não encontrado.'); return; }
             }
-            if ((int) $stock + $delta < 0) {
+            $stock = (int) $product['stock'];
+            $reserved = (int) $product['reserved_stock'];
+            if ($stock + $delta < 0) {
                 $this->db->rollBack();
                 { $this->back('error', 'O estoque não pode ficar negativo.'); return; }
+            }
+            if ($stock + $delta < $reserved) {
+                $this->db->rollBack();
+                { $this->back('error', 'O ajuste não pode ficar abaixo do estoque reservado para pagamentos em andamento.'); return; }
             }
             $this->db->prepare('UPDATE products SET stock = stock + :d WHERE id = :id')
                 ->execute([':d' => $delta, ':id' => $id]);
@@ -133,7 +139,9 @@ final class AdminCatalogController
             )->execute([':id' => $id, ':d' => $delta, ':r' => $reason, ':u' => $user['id']]);
             $this->db->commit();
         } catch (\Throwable $e) {
-            $this->db->rollBack();
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
             throw $e;
         }
         Audit::log($this->db, (int) $user['id'], 'stock_adjusted', 'product', (string) $id,
