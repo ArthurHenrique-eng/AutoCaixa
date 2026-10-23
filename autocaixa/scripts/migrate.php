@@ -104,18 +104,12 @@ foreach ($files as $file) {
 
     echo "Aplicando {$migration}\n";
 
-    try {
-        $pdo->beginTransaction();
-        $pdo->exec($sql);
-        recordMigration($pdo, $migration);
-        $pdo->commit();
-        $applied[$migration] = true;
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        throw $e;
-    }
+    // MySQL faz COMMIT implícito em vários comandos DDL (CREATE/ALTER/DROP).
+    // Portanto, não envolvemos arquivos de migração em beginTransaction()/commit().
+    // A migração só é registrada depois que todo o SQL foi executado com sucesso.
+    $pdo->exec($sql);
+    recordMigration($pdo, $migration);
+    $applied[$migration] = true;
 }
 
 echo "Migrações concluídas.\n";
