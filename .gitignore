@@ -1,48 +1,40 @@
-# WordPress - ignore core, configuration, examples, uploads and logs.
-# https://github.com/github/gitignore/blob/main/WordPress.gitignore
+# AutoCaixa / PHP
 
-# Core
-#
-# Note: if you want to stage/commit WP core files
-# you can delete this whole section/until Configuration.
-/wp-admin/
-/wp-content/index.php
-/wp-content/languages
-/wp-content/plugins/index.php
-/wp-content/themes/index.php
-/wp-includes/
-/index.php
-/license.txt
-/readme.html
-/wp-*.php
-/xmlrpc.php
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
 
-# Configuration
-wp-config.php
-
-# Example themes
-/wp-content/themes/twenty*/
-
-# Example plugin
-/wp-content/plugins/hello.php
-
-# Uploads
-/wp-content/uploads/
-
-# Log files
+# Logs e temporários
 *.log
+*.tmp
+*.temp
+*.cache
 
-# htaccess
-/.htaccess
+# Backups e dumps locais
+*.bak
+*.backup
+*.dump
+*.sql.gz
+/backups/
+/autocaixa/backups/
 
-# All plugins
-#
-# Note: If you wish to whitelist plugins,
-# uncomment the next line
-#/wp-content/plugins
+# IDE / sistema operacional
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
 
-# All themes
-#
-# Note: If you wish to whitelist themes,
-# uncomment the next line
-#/wp-content/themes
+# Dependências PHP, caso sejam adicionadas posteriormente
+/vendor/
+
+# Cobertura e artefatos de testes
+.phpunit.result.cache
+coverage/
+
+# Configurações locais do servidor
+php.ini
+.htpasswd
+
+# Não ignorar código-fonte, migrações, documentação ou assets do projeto.
