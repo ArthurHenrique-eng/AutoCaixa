@@ -8,6 +8,7 @@ use App\Core\Auth;
 use App\Core\Http;
 use App\Core\View;
 use PDO;
+use RuntimeException;
 
 /** Vendas, cancelamentos, falhas e relatórios. */
 final class AdminSalesController
@@ -22,7 +23,7 @@ final class AdminSalesController
         $from = Http::validDate($_GET['from'] ?? null) ?? date('Y-m-d');
         $to = Http::validDate($_GET['to'] ?? null) ?? date('Y-m-d');
         $status = (string) ($_GET['status'] ?? '');
-        $allowed = ['', 'awaiting_payment', 'paid', 'failed', 'cancelled'];
+        $allowed = ['', 'awaiting_payment', 'paid', 'failed', 'cancelled', 'expired'];
         if (!in_array($status, $allowed, true)) {
             $status = '';
         }
@@ -71,7 +72,7 @@ final class AdminSalesController
         ]);
     }
 
-    /** Cancela somente vendas que ainda não foram pagas. Estorno de venda paga depende da integração bancária. */
+    /** Cancela somente vendas que ainda não foram pagas e libera suas reservas de estoque. */
     public function saleCancel(int $id): void
     {
         $user = $this->auth->requireUser('sales.cancel');
@@ -94,15 +95,37 @@ final class AdminSalesController
                 Http::redirect('/admin/vendas/' . $id);
                 return;
             }
-            $this->db->prepare("UPDATE payments SET status = 'cancelled' WHERE sale_id = :id AND status = 'pending'")
+
+            $this->db->prepare("UPDATE payments SET status = 'cancelled' WHERE sale_id = :id AND status IN ('pending','unknown')")
                 ->execute([':id' => $id]);
+
+            $itemsStmt = $this->db->prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = :sale');
+            $itemsStmt->execute([':sale' => $id]);
+            $release = $this->db->prepare(
+                'UPDATE products
+                 SET reserved_stock = reserved_stock - :qty
+                 WHERE id = :id AND reserved_stock >= :qty_check'
+            );
+            foreach ($itemsStmt->fetchAll() as $item) {
+                $qty = (int) $item['quantity'];
+                $release->execute([
+                    ':qty' => $qty,
+                    ':qty_check' => $qty,
+                    ':id' => (int) $item['product_id'],
+                ]);
+                if ($release->rowCount() !== 1) {
+                    throw new RuntimeException('Não foi possível liberar a reserva de estoque.');
+                }
+            }
             $this->db->commit();
         } catch (\Throwable $e) {
-            $this->db->rollBack();
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
             throw $e;
         }
         Audit::log($this->db, (int) $user['id'], 'sale_cancelled', 'sale', (string) $id, null, Auth::ip());
-        Http::flash('ok', 'Venda cancelada. Nenhum estoque foi alterado.');
+        Http::flash('ok', 'Venda cancelada e reserva de estoque liberada.');
         Http::redirect('/admin/vendas/' . $id);
     }
 
@@ -133,7 +156,11 @@ final class AdminSalesController
         fputs($out, "\xEF\xBB\xBF"); // BOM para o Excel reconhecer acentos
         fputcsv($out, ['Produto', 'Quantidade', 'Receita'], ';');
         foreach ($rows as $r) {
-            fputcsv($out, [$r['product_name'], $r['quantity'], number_format($r['revenue_cents'] / 100, 2, ',', '')], ';');
+            fputcsv($out, [
+                $this->csvSafeCell((string) $r['product_name']),
+                $this->csvSafeCell((string) $r['quantity']),
+                $this->csvSafeCell(number_format($r['revenue_cents'] / 100, 2, ',', '')),
+            ], ';');
         }
         fclose($out);
     }
@@ -162,5 +189,15 @@ final class AdminSalesController
         );
         $stmt->execute([':from' => $from, ':to' => $to]);
         return $stmt->fetchAll();
+    }
+
+    /** Neutraliza células que planilhas podem interpretar como fórmulas. */
+    private function csvSafeCell(string $value): string
+    {
+        $value = ltrim($value, " \t\r\n");
+        if ($value !== '' && in_array($value[0], ['=', '+', '-', '@'], true)) {
+            return "'" . $value;
+        }
+        return $value;
     }
 }
