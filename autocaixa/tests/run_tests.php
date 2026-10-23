@@ -15,6 +15,7 @@ spl_autoload_register(function (string $class): void {
 });
 
 use App\Core\Database;
+use App\Integrations\Payments\PaymentGateway;
 use App\Integrations\Payments\SimulatedPaymentGateway;
 use App\Repositories\ProductRepository;
 use App\Services\CartService;
@@ -82,6 +83,13 @@ function stock_of(PDO $pdo, string $barcode): int
     return (int) $s->fetchColumn();
 }
 
+function reserved_of(PDO $pdo, string $barcode): int
+{
+    $s = $pdo->prepare('SELECT reserved_stock FROM products WHERE barcode = :b');
+    $s->execute([':b' => $barcode]);
+    return (int) $s->fetchColumn();
+}
+
 echo "AutoCaixa Local — testes da Fase 1\n";
 
 test('adiciona produto ativo pelo código de barras', function (PDO $pdo) {
@@ -101,7 +109,7 @@ test('rejeita código de barras com caracteres inválidos', function (PDO $pdo) 
     assert_throws(fn() => $cart->addByBarcode("10'; DROP TABLE products;--"), 'inválido');
 });
 
-test('limita quantidade pelo estoque', function (PDO $pdo) {
+test('limita quantidade pelo estoque disponível', function (PDO $pdo) {
     $cart = new CartService(new ProductRepository($pdo));
     assert_throws(fn() => $cart->setQuantity(
         (int) $pdo->query("SELECT id FROM products WHERE barcode='200'")->fetchColumn(), 6
@@ -129,7 +137,7 @@ test('remove do carrinho item cujo produto saiu de venda', function (PDO $pdo) {
     assert_true(count($summary['removed']) === 1, 'remoção deveria ser sinalizada');
 });
 
-test('venda pendente não baixa estoque', function (PDO $pdo) {
+test('venda pendente reserva estoque sem baixar estoque', function (PDO $pdo) {
     $repo = new ProductRepository($pdo);
     $cart = new CartService($repo);
     $cart->addByBarcode('100', 2);
@@ -138,10 +146,11 @@ test('venda pendente não baixa estoque', function (PDO $pdo) {
     $result = $checkout->start($cart->items(), 'pix');
     assert_true($result['total_cents'] === 3780, 'total da venda incorreto');
     assert_true(stock_of($pdo, '100') === 10, 'estoque não deveria mudar antes do pagamento');
+    assert_true(reserved_of($pdo, '100') === 2, 'estoque deveria ficar reservado durante o pagamento');
     assert_true($checkout->refresh($result['sale_id']) === 'awaiting_payment', 'deveria seguir aguardando');
 });
 
-test('venda aprovada baixa estoque uma única vez, mesmo com consultas repetidas', function (PDO $pdo) {
+test('venda aprovada baixa estoque uma única vez e consome a reserva', function (PDO $pdo) {
     $repo = new ProductRepository($pdo);
     $cart = new CartService($repo);
     $cart->addByBarcode('100', 2);
@@ -154,6 +163,7 @@ test('venda aprovada baixa estoque uma única vez, mesmo com consultas repetidas
     assert_true($checkout->refresh($result['sale_id']) === 'paid', 'segunda consulta deveria manter paga');
     assert_true($checkout->refresh($result['sale_id']) === 'paid', 'terceira consulta deveria manter paga');
     assert_true(stock_of($pdo, '100') === 8, 'estoque deveria baixar exatamente 2 unidades, veio ' . stock_of($pdo, '100'));
+    assert_true(reserved_of($pdo, '100') === 0, 'reserva deveria ser consumida após o pagamento');
 
     $moves = (int) $pdo->query("SELECT COUNT(*) FROM stock_movements WHERE sale_id = {$result['sale_id']}")->fetchColumn();
     assert_true($moves === 1, "deveria haver 1 movimento de estoque, houve $moves");
@@ -166,9 +176,9 @@ test('não finaliza sem confirmação do provedor', function (PDO $pdo) {
     $gateway = new SimulatedPaymentGateway($pdo);
     $checkout = new CheckoutService($pdo, $repo, $gateway);
     $result = $checkout->start($cart->items(), 'pix');
-    // Sem simulateApproval: o provedor continua pendente.
     assert_true($checkout->refresh($result['sale_id']) === 'awaiting_payment', 'não pode finalizar sem aprovação');
     assert_true(stock_of($pdo, '200') === 5, 'estoque não pode baixar sem pagamento');
+    assert_true(reserved_of($pdo, '200') === 1, 'estoque deve permanecer reservado enquanto aguarda pagamento');
 });
 
 test('recusa iniciar venda com carrinho vazio', function (PDO $pdo) {
@@ -194,7 +204,7 @@ test('recusa venda quando o estoque acabou antes do checkout', function (PDO $pd
     assert_throws(fn() => $checkout->start($cart->items(), 'pix'), 'Estoque insuficiente');
 });
 
-test('venda recusada pelo provedor vira falha e não baixa estoque', function (PDO $pdo) {
+test('venda recusada pelo provedor vira falha e libera a reserva', function (PDO $pdo) {
     $repo = new ProductRepository($pdo);
     $cart = new CartService($repo);
     $cart->addByBarcode('100');
@@ -205,6 +215,39 @@ test('venda recusada pelo provedor vira falha e não baixa estoque', function (P
         ->execute([':id' => $result['external_id']]);
     assert_true($checkout->refresh($result['sale_id']) === 'failed', 'venda recusada deveria ficar com falha');
     assert_true(stock_of($pdo, '100') === 10, 'estoque não pode baixar em venda recusada');
+    assert_true(reserved_of($pdo, '100') === 0, 'reserva deveria ser liberada após recusa');
+});
+
+test('resultado desconhecido do gateway não marca venda como paga nem libera reserva', function (PDO $pdo) {
+    $repo = new ProductRepository($pdo);
+    $cart = new CartService($repo);
+    $cart->addByBarcode('100');
+    $gateway = new class implements PaymentGateway {
+        public function name(): string { return 'test-unknown'; }
+        public function createCharge(int $amountCents, string $method, string $reference): string { throw new RuntimeException('timeout'); }
+        public function status(string $externalId): string { return 'unknown'; }
+    };
+    $checkout = new CheckoutService($pdo, $repo, $gateway);
+    assert_throws(fn() => $checkout->start($cart->items(), 'pix'), 'resultado da cobrança não pôde ser confirmado');
+    $saleId = (int) $pdo->query('SELECT id FROM sales ORDER BY id DESC LIMIT 1')->fetchColumn();
+    assert_true($saleId > 0, 'venda deveria existir para reconciliação');
+    assert_true($pdo->query("SELECT status FROM sales WHERE id = $saleId")->fetchColumn() === 'awaiting_payment', 'venda não pode virar falha por timeout ambíguo');
+    assert_true($pdo->query("SELECT status FROM payments WHERE sale_id = $saleId")->fetchColumn() === 'unknown', 'pagamento deveria ficar desconhecido');
+    assert_true(reserved_of($pdo, '100') === 1, 'reserva deve permanecer até confirmação ou expiração');
+});
+
+test('venda pendente expira e libera a reserva após o prazo', function (PDO $pdo) {
+    $repo = new ProductRepository($pdo);
+    $cart = new CartService($repo);
+    $cart->addByBarcode('100');
+    $gateway = new SimulatedPaymentGateway($pdo);
+    $checkout = new CheckoutService($pdo, $repo, $gateway);
+    $result = $checkout->start($cart->items(), 'pix');
+    $pdo->exec("UPDATE sales SET created_at = DATE_SUB(NOW(), INTERVAL 121 SECOND) WHERE id = {$result['sale_id']}");
+
+    assert_true($checkout->refresh($result['sale_id']) === 'expired', 'venda deveria expirar');
+    assert_true(reserved_of($pdo, '100') === 0, 'reserva deveria ser liberada após expiração');
+    assert_true(stock_of($pdo, '100') === 10, 'estoque físico não deve mudar na expiração');
 });
 
 echo "\n" . count($failed) . " falha(s), $passed aprovado(s)\n";
