@@ -1,0 +1,11 @@
+Options -Indexes
+
+RewriteEngine On
+
+# O front controller trata todas as rotas da aplicação.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+# Impede acesso direto a arquivos ocultos, exceto o próprio .htaccess.
+RewriteRule (^|/)\.(?!htaccess$) - [F,L]
