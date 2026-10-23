@@ -1,0 +1,10 @@
+---
+description: Regras gerais do projeto AutoCaixa
+alwaysApply: true
+---
+
+A fonte canônica das instruções está em `autocaixa/Prompt/`.
+
+Antes de editar, leia `autocaixa/Prompt/AGENTS.md`, `autocaixa/Prompt/PROJECT_CONTEXT.md` e `autocaixa/Prompt/AUTOCAIXA_REGRAS_ESPECIFICAS.md`. Abra somente as políticas adicionais relevantes à tarefa.
+
+Preserve segurança, integridade de dados e funcionalidades existentes. Não invente fatos ou comandos. Para pagamentos, estoque, autenticação e dados administrativos, valide o comportamento no servidor e execute os testes pertinentes. Não exponha segredos.
