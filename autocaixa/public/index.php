@@ -43,6 +43,20 @@ $_SESSION['sales'] ??= [];
 $method = $_SERVER['REQUEST_METHOD'];
 $path = rtrim((string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/') ?: '/';
 
+// Totens são compartilhados: o carrinho e as vendas transitórias não podem sobreviver
+// indefinidamente à inatividade do operador. A expiração também é aplicada no servidor,
+// independentemente do temporizador JavaScript do navegador.
+$isTotemRequest = !str_starts_with($path, '/admin') && $path !== '/health';
+if ($isTotemRequest) {
+    $now = time();
+    $lastActivity = (int) ($_SESSION['totem_last_activity'] ?? 0);
+    if ($lastActivity > 0 && ($now - $lastActivity) >= 120) {
+        $_SESSION['cart'] = [];
+        $_SESSION['sales'] = [];
+    }
+    $_SESSION['totem_last_activity'] = $now;
+}
+
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'");
