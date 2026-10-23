@@ -12,12 +12,15 @@ use RuntimeException;
 /**
  * Finalização da venda. Regras críticas:
  * - o total é recalculado no servidor a partir do banco;
+ * - o estoque é reservado durante o pagamento para impedir overselling;
  * - a venda só vira "paid" após confirmação do provedor;
- * - a baixa de estoque ocorre uma única vez, mesmo com consultas ou notificações repetidas.
+ * - a baixa definitiva e a liberação da reserva são transacionais e idempotentes;
+ * - falhas com resultado de pagamento desconhecido não são tratadas como pagamento recusado.
  */
 final class CheckoutService
 {
     private const METHODS = ['pix', 'card'];
+    private const RESERVATION_TTL_SECONDS = 120;
 
     public function __construct(
         private PDO $db,
@@ -38,20 +41,23 @@ final class CheckoutService
         $ids = array_map('intval', array_keys($cartItems));
         $this->db->beginTransaction();
         try {
+            $this->expireStaleSales();
             $products = $this->products->lockByIds($ids);
             $total = 0;
             $lines = [];
             foreach ($cartItems as $productId => $qty) {
+                $qty = (int) $qty;
                 $p = $products[(int) $productId] ?? null;
                 if ($p === null || (int) $p['active'] !== 1) {
                     throw new DomainException('Um produto saiu de venda. Revise o carrinho.');
                 }
-                if ((int) $p['stock'] < (int) $qty) {
+                $available = (int) $p['stock'] - (int) $p['reserved_stock'];
+                if ($available < $qty) {
                     throw new DomainException('Estoque insuficiente para ' . $p['name'] . '.');
                 }
-                $subtotal = (int) $p['price_cents'] * (int) $qty;
+                $subtotal = (int) $p['price_cents'] * $qty;
                 $total += $subtotal;
-                $lines[] = [$p, (int) $qty, $subtotal];
+                $lines[] = [$p, $qty, $subtotal];
             }
 
             $this->db->prepare(
@@ -63,11 +69,24 @@ final class CheckoutService
                 'INSERT INTO sale_items (sale_id, product_id, product_name, unit_price_cents, quantity, subtotal_cents)
                  VALUES (:sale, :product, :name, :unit, :qty, :subtotal)'
             );
+            $reserveStmt = $this->db->prepare(
+                'UPDATE products
+                 SET reserved_stock = reserved_stock + :qty
+                 WHERE id = :id AND stock - reserved_stock >= :available_qty'
+            );
             foreach ($lines as [$p, $qty, $subtotal]) {
                 $itemStmt->execute([
                     ':sale' => $saleId, ':product' => (int) $p['id'], ':name' => $p['name'],
                     ':unit' => (int) $p['price_cents'], ':qty' => $qty, ':subtotal' => $subtotal,
                 ]);
+                $reserveStmt->execute([
+                    ':qty' => $qty,
+                    ':id' => (int) $p['id'],
+                    ':available_qty' => $qty,
+                ]);
+                if ($reserveStmt->rowCount() !== 1) {
+                    throw new RuntimeException('Não foi possível reservar o estoque. Tente novamente.');
+                }
             }
 
             $this->db->prepare(
@@ -79,16 +98,24 @@ final class CheckoutService
             $paymentId = (int) $this->db->lastInsertId();
             $this->db->commit();
         } catch (\Throwable $e) {
-            $this->db->rollBack();
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
             throw $e;
         }
 
         try {
             $externalId = $this->gateway->createCharge($total, $method, 'SALE-' . $saleId);
         } catch (\Throwable $e) {
-            $this->db->prepare("UPDATE payments SET status = 'failed' WHERE id = :id")->execute([':id' => $paymentId]);
-            $this->db->prepare("UPDATE sales SET status = 'failed' WHERE id = :id")->execute([':id' => $saleId]);
-            throw new RuntimeException('Não foi possível criar a cobrança. Tente novamente ou chame um funcionário.', 0, $e);
+            // O provedor pode ter recebido a cobrança antes de a conexão falhar.
+            // Não liberamos a reserva nem marcamos a venda como recusada sem confirmação.
+            $this->db->prepare("UPDATE payments SET status = 'unknown' WHERE id = :id AND status = 'pending'")
+                ->execute([':id' => $paymentId]);
+            throw new RuntimeException(
+                'Não foi possível confirmar o resultado da cobrança. Não tente pagar novamente; chame um funcionário.',
+                0,
+                $e
+            );
         }
 
         $this->db->prepare('UPDATE payments SET external_id = :ext WHERE id = :id')
@@ -111,27 +138,38 @@ final class CheckoutService
             return $sale['status'];
         }
 
-        $payment = $this->latestPendingPayment($saleId);
+        if (strtotime((string) $sale['created_at']) <= time() - self::RESERVATION_TTL_SECONDS) {
+            $this->expireSale($saleId);
+            return 'expired';
+        }
+
+        $payment = $this->latestPayment($saleId);
         if ($payment === null || $payment['external_id'] === null) {
             return 'awaiting_payment';
         }
 
-        $remote = $this->gateway->status($payment['external_id']);
+        try {
+            $remote = $this->gateway->status($payment['external_id']);
+        } catch (\Throwable $e) {
+            $this->markPaymentUnknown((int) $payment['id']);
+            return 'awaiting_payment';
+        }
+
         if ($remote === 'approved') {
             $this->finalizePaid($saleId, (int) $payment['id']);
             return 'paid';
         }
         if ($remote === 'declined') {
-            $this->db->prepare("UPDATE payments SET status = 'declined' WHERE id = :id AND status = 'pending'")
-                ->execute([':id' => $payment['id']]);
-            $this->db->prepare("UPDATE sales SET status = 'failed' WHERE id = :id AND status = 'awaiting_payment'")
-                ->execute([':id' => $saleId]);
+            $this->failAndRelease($saleId, (int) $payment['id'], 'declined');
             return 'failed';
+        }
+        if ($remote === 'unknown') {
+            $this->markPaymentUnknown((int) $payment['id']);
         }
         return 'awaiting_payment';
     }
 
-    /** Baixa de estoque e mudança de estado em uma única transação, sem duplicar nada. */
+    /** Baixa definitiva e mudança de estado em uma única transação, sem duplicar nada. */
     private function finalizePaid(int $saleId, int $paymentId): void
     {
         $this->db->beginTransaction();
@@ -141,12 +179,11 @@ final class CheckoutService
             );
             $upd->execute([':id' => $saleId]);
             if ($upd->rowCount() === 0) {
-                // Outra requisição já finalizou esta venda. Não baixar estoque de novo.
                 $this->db->commit();
                 return;
             }
 
-            $this->db->prepare("UPDATE payments SET status = 'approved' WHERE id = :id AND status = 'pending'")
+            $this->db->prepare("UPDATE payments SET status = 'approved' WHERE id = :id AND status IN ('pending','unknown')")
                 ->execute([':id' => $paymentId]);
 
             $itemsStmt = $this->db->prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = :sale');
@@ -154,25 +191,33 @@ final class CheckoutService
             $items = $itemsStmt->fetchAll();
 
             $decrement = $this->db->prepare(
-                'UPDATE products SET stock = stock - :qty WHERE id = :id AND stock >= :qty_check'
+                'UPDATE products
+                 SET stock = stock - :qty, reserved_stock = reserved_stock - :qty
+                 WHERE id = :id AND stock >= :qty_check AND reserved_stock >= :qty_check'
             );
             $movement = $this->db->prepare(
                 "INSERT INTO stock_movements (product_id, quantity_change, reason, sale_id)
                  VALUES (:id, :change, 'sale', :sale)"
             );
             foreach ($items as $item) {
-                $decrement->execute([':qty' => (int) $item['quantity'], ':qty_check' => (int) $item['quantity'], ':id' => (int) $item['product_id']]);
-                if ($decrement->rowCount() === 0) {
-                    // Estoque insuficiente após o pagamento. Reverter tudo e sinalizar para atendimento.
-                    throw new RuntimeException('Estoque insuficiente na finalização. Chame um funcionário.');
+                $qty = (int) $item['quantity'];
+                $decrement->execute([
+                    ':qty' => $qty,
+                    ':qty_check' => $qty,
+                    ':id' => (int) $item['product_id'],
+                ]);
+                if ($decrement->rowCount() !== 1) {
+                    throw new RuntimeException('Estoque inconsistente na finalização. Chame um funcionário.');
                 }
                 $movement->execute([
-                    ':id' => (int) $item['product_id'], ':change' => -(int) $item['quantity'], ':sale' => $saleId,
+                    ':id' => (int) $item['product_id'], ':change' => -$qty, ':sale' => $saleId,
                 ]);
             }
             $this->db->commit();
         } catch (\Throwable $e) {
-            $this->db->rollBack();
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
             throw $e;
         }
     }
@@ -182,25 +227,119 @@ final class CheckoutService
         $stmt = $this->db->prepare(
             "SELECT external_id FROM payments WHERE sale_id = :sale AND external_id IS NOT NULL ORDER BY id DESC LIMIT 1"
         );
-        $stmt->execute([":sale" => $saleId]);
+        $stmt->execute([':sale' => $saleId]);
         $value = $stmt->fetchColumn();
         return $value === false ? null : (string) $value;
     }
 
     private function fetchSale(int $saleId): ?array
     {
-        $stmt = $this->db->prepare('SELECT id, status, total_cents FROM sales WHERE id = :id');
+        $stmt = $this->db->prepare('SELECT id, status, total_cents, created_at FROM sales WHERE id = :id');
         $stmt->execute([':id' => $saleId]);
         return $stmt->fetch() ?: null;
     }
 
-    private function latestPendingPayment(int $saleId): ?array
+    private function latestPayment(int $saleId): ?array
     {
         $stmt = $this->db->prepare(
-            "SELECT id, external_id, status FROM payments WHERE sale_id = :sale AND status = 'pending'
-             ORDER BY id DESC LIMIT 1"
+            "SELECT id, external_id, status FROM payments WHERE sale_id = :sale ORDER BY id DESC LIMIT 1"
         );
         $stmt->execute([':sale' => $saleId]);
         return $stmt->fetch() ?: null;
+    }
+
+    private function markPaymentUnknown(int $paymentId): void
+    {
+        $this->db->prepare("UPDATE payments SET status = 'unknown' WHERE id = :id AND status IN ('pending','unknown')")
+            ->execute([':id' => $paymentId]);
+    }
+
+    private function failAndRelease(int $saleId, int $paymentId, string $paymentStatus): void
+    {
+        $this->db->beginTransaction();
+        try {
+            $upd = $this->db->prepare(
+                "UPDATE sales SET status = 'failed' WHERE id = :id AND status = 'awaiting_payment'"
+            );
+            $upd->execute([':id' => $saleId]);
+            if ($upd->rowCount() === 1) {
+                $this->db->prepare("UPDATE payments SET status = :status WHERE id = :id AND status IN ('pending','unknown')")
+                    ->execute([':status' => $paymentStatus, ':id' => $paymentId]);
+                $this->releaseReservation($saleId);
+            }
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function expireSale(int $saleId): void
+    {
+        $this->db->beginTransaction();
+        try {
+            $upd = $this->db->prepare(
+                "UPDATE sales SET status = 'expired' WHERE id = :id AND status = 'awaiting_payment'"
+            );
+            $upd->execute([':id' => $saleId]);
+            if ($upd->rowCount() === 1) {
+                $this->db->prepare("UPDATE payments SET status = 'expired' WHERE sale_id = :id AND status IN ('pending','unknown')")
+                    ->execute([':id' => $saleId]);
+                $this->releaseReservation($saleId);
+            }
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /** Libera reservas vencidas antes de validar um novo checkout. */
+    private function expireStaleSales(): void
+    {
+        $stmt = $this->db->prepare(
+            "SELECT id FROM sales
+             WHERE status = 'awaiting_payment'
+               AND created_at < DATE_SUB(NOW(), INTERVAL :ttl SECOND)
+             FOR UPDATE"
+        );
+        $stmt->bindValue(':ttl', self::RESERVATION_TTL_SECONDS, PDO::PARAM_INT);
+        $stmt->execute();
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        foreach ($ids as $saleId) {
+            $this->db->prepare("UPDATE payments SET status = 'expired' WHERE sale_id = :id AND status IN ('pending','unknown')")
+                ->execute([':id' => $saleId]);
+            $this->releaseReservation($saleId);
+            $this->db->prepare("UPDATE sales SET status = 'expired' WHERE id = :id AND status = 'awaiting_payment'")
+                ->execute([':id' => $saleId]);
+        }
+    }
+
+    private function releaseReservation(int $saleId): void
+    {
+        $itemsStmt = $this->db->prepare('SELECT product_id, quantity FROM sale_items WHERE sale_id = :sale');
+        $itemsStmt->execute([':sale' => $saleId]);
+        $items = $itemsStmt->fetchAll();
+
+        $release = $this->db->prepare(
+            'UPDATE products
+             SET reserved_stock = reserved_stock - :qty
+             WHERE id = :id AND reserved_stock >= :qty_check'
+        );
+        foreach ($items as $item) {
+            $qty = (int) $item['quantity'];
+            $release->execute([
+                ':qty' => $qty,
+                ':qty_check' => $qty,
+                ':id' => (int) $item['product_id'],
+            ]);
+            if ($release->rowCount() !== 1) {
+                throw new RuntimeException('Não foi possível liberar uma reserva de estoque. Chame um funcionário.');
+            }
+        }
     }
 }
