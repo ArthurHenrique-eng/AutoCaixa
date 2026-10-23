@@ -11,11 +11,12 @@ Sistema web de autoatendimento para pequenos comércios. O cliente registra os p
 **Totem (público)**
 - Leitura de código de barras pelo campo de leitor, com Enter como terminador.
 - Carrinho guardado no servidor. Preços, nomes e estoque são recalculados a cada operação.
-- Limite de quantidade pelo estoque e por item. Produtos inativos são recusados.
+- Limite de quantidade pelo estoque disponível, considerando reservas temporárias, e por item. Produtos inativos são recusados.
+- Estoque é reservado durante o pagamento para evitar overselling entre checkouts concorrentes.
 - Venda só é finalizada após confirmação do provedor, e o estoque é baixado uma única vez.
 - Venda pertence à sessão que a criou. Outra sessão recebe 404.
 - Carrinho é limpo após pagamento aprovado.
-- Tela de inatividade que volta ao início.
+- Inatividade é aplicada no servidor e no navegador; após 120 segundos sem requisições do totem, o estado transitório da sessão é limpo.
 
 **Painel administrativo (`/admin`)**
 - Login com senha em hash (bcrypt), bloqueio após 5 falhas por 15 minutos, e nova sessão a cada login.
@@ -26,15 +27,15 @@ Sistema web de autoatendimento para pequenos comércios. O cliente registra os p
 - Início com vendas do dia, aguardando pagamento, falhas e estoque baixo.
 - Produtos: cadastro, edição, ativação e desativação. Validação de código, nome, preço e estoque mínimo.
 - Estoque: entradas, ajustes de inventário e perdas, com motivo obrigatório. Estoque nunca fica negativo. Cada movimento registra o usuário.
-- Vendas: filtro por período e situação, detalhes com pagamentos, e cancelamento de vendas aguardando pagamento.
-- Relatórios: total por produto no período (somente vendas pagas), com exportação em CSV.
+- Vendas: filtro por período e situação, detalhes com pagamentos, e cancelamento de vendas aguardando pagamento com liberação da reserva.
+- Relatórios: total por produto no período (somente vendas pagas), com exportação CSV protegida contra injeção de fórmulas em planilhas.
 - Usuários: criação e desativação. Não é possível desativar a própria conta.
 - Auditoria: login, falhas de login, alterações de produtos, estoque, vendas, usuários e exportações. Campos sensíveis são removidos antes de gravar.
 
 **Infraestrutura**
 - Proteção CSRF em todas as operações de escrita.
 - Cabeçalhos de segurança: CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy e HSTS em HTTPS.
-- Configuração de Apache para hospedagem (`public/.htaccess`), com redirecionamento para HTTPS.
+- Configuração de Apache em `public/.htaccess`, com front controller e bloqueio de listagem de diretórios/arquivos ocultos.
 - Endpoint `/health` para monitoramento.
 - Script de backup com retenção, que recusa gravar dentro de `public/`.
 - Código, configurações e logs ficam fora de `public/`.
@@ -98,7 +99,7 @@ app/Services/                 carrinho e finalização (regras de negócio)
 app/Repositories/             acesso a produtos
 app/Integrations/Payments/    interface PaymentGateway e driver simulado
 app/Views/                    templates PHP (totem e admin/)
-database/migrations/          001 (vendas e estoque), 002 (usuários e auditoria)
+database/migrations/          001 (vendas/estoque), 002 (usuários/auditoria), 003 (reservas de estoque)
 database/seeds/               produtos de desenvolvimento
 config/                       configuração lida do ambiente
 scripts/                      migração, criação de administrador e backup
@@ -111,15 +112,15 @@ docs/                         hospedagem, totem Windows e operação
 - `docs/hospedagem.md`: requisitos, estrutura no servidor, publicação, backup, atualização e diagnóstico na Hostinger.
 - `docs/totem-windows.md`: Edge em modo quiosque e Acesso Atribuído. **Não testado no equipamento real; confirme os argumentos na documentação da Microsoft.**
 - `docs/operacao.md`: rotina diária e situações comuns da loja.
+- `Prompt/`: políticas para agentes de IA, segurança, privacidade, arquitetura, testes, banco, pagamentos, documentação e workflow.
 
 ## Limitações conhecidas
 
 - **Pagamentos simulados.** Cartão e Pix não cobram nada real. A integração bancária é a última etapa.
 - **Sem webhook.** A confirmação é por consulta. O driver real deve adicionar notificações e validação de origem.
 - **Sem estorno de venda paga.** Só cancelamento de venda aguardando pagamento. Estorno depende da integração bancária.
-- **Falta de estoque na finalização.** Se o estoque acabar entre o pagamento e a baixa, a venda falha e precisa de atendimento. Não há estorno automático ainda.
+- **Resultado de pagamento desconhecido.** Se a comunicação com o provedor falhar em um ponto ambíguo, a cobrança fica em estado `unknown` e a reserva permanece até confirmação ou expiração; o sistema não marca a venda como paga nem libera a reserva prematuramente.
 - **Sem comprovante fiscal.** Apenas comprovante interno.
-- **Carrinho não é limpo no servidor por inatividade.** Só o navegador volta ao início.
 - **Sem feedback sonoro.**
 - **Senha do usuário não pode ser trocada pelo próprio usuário ainda.** O administrador cria a conta com senha inicial.
 - **Testes de interface não feitos:** navegador real, leitor físico, tela touch, Windows, Edge e quiosque.
