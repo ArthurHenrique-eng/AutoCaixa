@@ -10,11 +10,11 @@
   <img src="https://img.shields.io/badge/status-em%20planejamento-64748b?style=for-the-badge" alt="Status: em planejamento" />
   <img src="https://img.shields.io/badge/backend-PHP%208.5%2B-777BB4?style=for-the-badge&logo=php&logoColor=white" alt="Backend PHP 8.5+" />
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="Banco MySQL" />
-  <img src="https://img.shields.io/badge/payments-Mercado%20Pago-00AEEF?style=for-the-badge&logo=mercadopago&logoColor=white" alt="Integração planejada Mercado Pago" />
 </p>
 
 <p align="center">
   <strong>Um caixa de autoatendimento acessível para lojas locais.</strong><br />
+
   Leia produtos, confira o carrinho e pague em uma experiência simples, com operação dedicada em modo quiosque.
 </p>
 Sobre o projeto
@@ -35,16 +35,25 @@ Objetivos
 - Disponibilizar um painel administrativo protegido.
 - Operar no Edge em modo quiosque, reduzindo o acesso do cliente a outras funções do Windows.
 - Criar uma base que possa evoluir para outras lojas e terminais.
-Como a solução será organizada
+
+Como a solução será organizada:
 ```mermaid
 flowchart TD
-    A[Cliente no terminal] --> B[Edge em modo quiosque]
-    B -->|HTTPS| C[Aplicação web hospedada]
-    C --> D[Backend PHP]
-    D <--> E[(MySQL)]
-    D --> F[API de pagamentos]
-    F <--> G[Terminal Point compatível]
+
+    A [Cliente no terminal] --> B[Edge em modo quiosque].
+
+    B -->|HTTPS| == C[Aplicação web hospedada].
+
+    C --> D[Backend PHP].
+
+    D <--> E[(MySQL)].
+
+    D --> F[API de pagamentos].
+
+    F <--> G[Terminal Point compatível].
+
     F -->|Notificações / consulta de estado| D
+
     D --> H[Venda confirmada e registro de estoque]
 ```
 O navegador será responsável pela interface. O backend PHP será a autoridade para preços, regras da venda e validação do pagamento. O banco MySQL armazenará os dados do negócio; credenciais financeiras não deverão ser expostas no frontend.
@@ -59,20 +68,16 @@ Fluxo previsto de compra
 4. O cliente confere os itens e o total calculado pelo servidor.
 5. O backend cria a cobrança pela integração habilitada.
 6. O pagamento é confirmado por consulta ou notificação validada do provedor.
-7. A venda é finalizada, o estoque é atualizado uma única vez e a tela retorna ao início.
-Se houver falha de conexão ou um resultado financeiro desconhecido, a compra não deverá ser marcada como paga até que o estado real seja verificado.
-Tecnologias
-Camada	Tecnologia	Responsabilidade
-Backend	PHP 8.5.12 ou patch de segurança posterior	Regras de negócio, sessões, autenticação e renderização
-Interface	HTML5 com templates PHP	Estrutura das páginas e apresentação de dados
-Interações	JavaScript	Scanner, animações, avisos e atualizações da interface
-Estilos	CSS3	Layout responsivo e experiência para touchscreen
-Banco de dados	MySQL / InnoDB	Produtos, estoque, vendas, pagamentos e auditoria
-Acesso a dados	PDO e consultas preparadas	Comunicação segura com o MySQL
-Hospedagem	Linux com PHP e MySQL	Publicação da aplicação via HTTPS
-Terminal cliente	Windows + Microsoft Edge	Acesso à interface do totem
-Modo restrito	Windows Assigned Access	Inicialização do Edge em experiência de quiosque
-Pagamento planejado	Mercado Pago Point / Orders API	Integração presencial, condicionada ao terminal e à conta compatíveis
+7. O AutoCaixa Local utiliza PHP, HTML, CSS, JavaScript e MySQL para oferecer autoatendimento em lojas locais, com cadastro de produtos, controle de estoque e processamento seguro de vendas.
+
+Tecnologias e infraestrutura:
+- Backend: PHP 8.5.12 ou patch de segurança posterior.
+- Interface: HTML5, templates PHP, CSS3 e JavaScript.
+- Banco de dados: MySQL com InnoDB e acesso seguro via PDO.
+- Hospedagem: servidor Linux com HTTPS.
+- Totem: computador Windows com Microsoft Edge em modo quiosque, configurado pelo Assigned Access.
+- Pagamentos: Mercado Pago Point com Orders API, condicionado à compatibilidade do terminal e da conta.
+Segurança das vendas: o estoque será atualizado apenas uma vez por venda confirmada. Em caso de falha de conexão ou dúvida sobre o pagamento, o sistema verificará o estado real da transação antes de finalizar a compra.
 
 
 Versão do PHP: consultar php.net/downloads antes da implantação e utilizar a versão estável suportada com os patches mais recentes. A referência inicial deste projeto é PHP 8.5.12, publicada em 21/10/2026.

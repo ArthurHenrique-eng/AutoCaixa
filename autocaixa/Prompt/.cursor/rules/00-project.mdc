@@ -1,0 +1,8 @@
+---
+description: Instruções gerais do projeto e seleção de políticas por tarefa
+alwaysApply: true
+---
+
+Leia `AGENTS.md` para instruções do repositório e use `PROJECT_CONTEXT.md` se estiver preenchido. Abra somente os documentos de política relevantes à tarefa, indicados no `AGENTS.md`.
+
+Inspecione o código e o estado do Git antes de afirmar como algo funciona ou editar. Preserve alterações do usuário, faça mudanças focadas, execute verificações pertinentes e reporte resultados reais. Não invente testes ou conformidade. Não faça commit, push, deploy, migrações destrutivas ou alterações em sistemas externos sem autorização explícita para essa ação específica.
