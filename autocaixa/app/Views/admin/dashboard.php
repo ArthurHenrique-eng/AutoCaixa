@@ -1,80 +1,48 @@
 <?php require __DIR__ . '/_header.php'; ?>
-<section class="admin-page-head">
+<div class="page-head">
   <div>
-    <p class="admin-eyebrow">PAINEL DE CONTROLE</p>
-    <h1>Visão geral</h1>
-    <p class="admin-subtitle">Acompanhe as vendas e o estado do estoque da loja.</p>
+    <h1>Início</h1>
+    <p class="muted">Resumo de hoje, <?= $e(date('d/m/Y')) ?>.</p>
   </div>
-  <div class="admin-datebox">
-    <span class="admin-date-icon"><?= $adminIcon('clock') ?></span>
-    <span><small>Hoje</small><strong><?= $e(date('d/m/Y')) ?></strong></span>
+</div>
+
+<div class="kpi-grid">
+  <div class="card kpi"><span class="kpi-label">Vendas pagas hoje</span><strong class="kpi-value"><?= $e($todayCount) ?></strong></div>
+  <div class="card kpi"><span class="kpi-label">Total de hoje</span><strong class="kpi-value"><?= $e($money($todayTotal)) ?></strong></div>
+  <div class="card kpi"><span class="kpi-label">Aguardando pagamento</span><strong class="kpi-value"><?= $e($awaiting) ?></strong></div>
+  <div class="card kpi <?= $failedToday > 0 ? 'is-alert' : '' ?>"><span class="kpi-label">Falhas hoje</span><strong class="kpi-value"><?= $e($failedToday) ?></strong></div>
+</div>
+
+<section class="card card-flush" aria-labelledby="low-stock-title">
+  <div class="card-head">
+    <h2 id="low-stock-title">Estoque baixo</h2>
+    <?php if ($lowStock !== []): ?><span class="badge badge-warning"><?= $e(count($lowStock)) ?> <?= count($lowStock) === 1 ? 'produto' : 'produtos' ?></span><?php endif; ?>
   </div>
-</section>
-
-<section class="admin-kpis" aria-label="Indicadores de hoje">
-  <article class="admin-stat-card">
-    <div class="admin-stat-heading"><span>Vendas pagas hoje</span><span class="admin-stat-icon tone-primary"><?= $adminIcon('receipt-text') ?></span></div>
-    <strong class="admin-stat-value"><?= $e($todayCount) ?></strong>
-    <p class="admin-stat-note">Vendas concluídas</p>
-  </article>
-  <article class="admin-stat-card">
-    <div class="admin-stat-heading"><span>Total de hoje</span><span class="admin-stat-icon tone-ok"><?= $adminIcon('banknote') ?></span></div>
-    <strong class="admin-stat-value"><?= $e($money($todayTotal)) ?></strong>
-    <p class="admin-stat-note">Receita de vendas pagas</p>
-  </article>
-  <article class="admin-stat-card">
-    <div class="admin-stat-heading"><span>Aguardando pagamento</span><span class="admin-stat-icon tone-info"><?= $adminIcon('clock') ?></span></div>
-    <strong class="admin-stat-value"><?= $e($awaiting) ?></strong>
-    <p class="admin-stat-note">Vendas em aberto</p>
-  </article>
-  <article class="admin-stat-card">
-    <div class="admin-stat-heading"><span>Falhas hoje</span><span class="admin-stat-icon tone-danger"><?= $adminIcon('triangle-alert') ?></span></div>
-    <strong class="admin-stat-value"><?= $e($failedToday) ?></strong>
-    <p class="admin-stat-note">Pagamentos não concluídos</p>
-  </article>
-</section>
-
-<section class="admin-section" aria-labelledby="low-stock-heading">
-  <div class="admin-section-head">
-    <div>
-      <p class="admin-eyebrow">INVENTÁRIO</p>
-      <h2 id="low-stock-heading">Estoque baixo</h2>
-      <p class="admin-subtitle">Produtos que precisam de atenção para evitar falta na loja.</p>
+  <?php if ($lowStock === []): ?>
+    <div class="empty-state">
+      <strong>Estoque em dia</strong>
+      <span>Nenhum produto abaixo do estoque mínimo.</span>
     </div>
-    <span class="admin-tag <?= $lowStock === [] ? 'is-ok' : 'is-warning' ?>">
-      <?= $lowStock === [] ? 'Sem alertas' : count($lowStock) . (count($lowStock) === 1 ? ' produto' : ' produtos') ?>
-    </span>
-  </div>
-
-  <div class="admin-panel">
-    <?php if ($lowStock === []): ?>
-      <div class="admin-empty-state">
-        <span class="admin-empty-icon"><?= $adminIcon('circle-check') ?></span>
-        <div>
-          <strong>Estoque sob controle</strong>
-          <p>Nenhum produto está abaixo do estoque mínimo.</p>
-        </div>
-      </div>
-    <?php else: ?>
-      <div class="admin-table-scroll">
-        <table class="table admin-stock-table">
-          <thead><tr><th>Produto</th><th>Código de barras</th><th>Estoque atual</th><th>Estoque mínimo</th></tr></thead>
-          <tbody>
-          <?php foreach ($lowStock as $p): ?>
-            <tr>
-              <td><strong><?= $e($p['name']) ?></strong></td>
-              <td><span class="admin-code"><?= $e($p['barcode']) ?></span></td>
-              <td><span class="admin-stock-count is-low"><?= $e($p['stock']) ?></span></td>
-              <td><?= $e($p['min_stock']) ?></td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-      <?php if (\App\Core\Permissions::allows($user['role'], 'products.manage')): ?>
-        <div class="admin-panel-footer"><a class="btn btn-secondary btn-sm" href="/admin/produtos"><?= $adminIcon('package') ?>Gerenciar produtos</a></div>
-      <?php endif; ?>
+  <?php else: ?>
+    <div class="table-wrap">
+      <table class="table table-responsive">
+        <thead><tr><th>Produto</th><th>Código</th><th class="num">Estoque</th><th class="num">Mínimo</th><th>Situação</th></tr></thead>
+        <tbody>
+        <?php foreach ($lowStock as $p): ?>
+          <tr>
+            <td data-label="Produto" class="row-title"><?= $e($p['name']) ?></td>
+            <td data-label="Código"><?= $e($p['barcode']) ?></td>
+            <td data-label="Estoque" class="num"><?= $e($p['stock']) ?></td>
+            <td data-label="Mínimo" class="num"><?= $e($p['min_stock']) ?></td>
+            <td data-label="Situação"><?php if ((int) $p['stock'] === 0): ?><span class="badge badge-danger">Sem estoque</span><?php else: ?><span class="badge badge-warning">Estoque baixo</span><?php endif; ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php if (\App\Core\Permissions::allows($user['role'], 'products.manage')): ?>
+      <div class="toolbar"><span class="field-note">Registre a entrada de mercadoria em Produtos, no botão "Estoque".</span><a class="btn btn-secondary btn-sm" href="/admin/produtos">Ir para Produtos</a></div>
     <?php endif; ?>
-  </div>
+  <?php endif; ?>
 </section>
 <?php require __DIR__ . '/_footer.php'; ?>

@@ -307,16 +307,6 @@
 
   /* ---------- Painel e componentes compartilhados ---------- */
 
-  function initTheme() {
-    if (!document.body.classList.contains('admin')) return; // o totem é sempre claro
-    var saved = null;
-    try { saved = localStorage.getItem('ac-theme'); } catch (e) { /* armazenamento indisponível */ }
-    var theme = (saved === 'dark' || saved === 'light')
-      ? saved
-      : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    document.documentElement.setAttribute('data-theme', theme);
-  }
-
   function setNav(open) {
     var toggle = document.querySelector('[data-nav-toggle]');
     document.body.classList.toggle('nav-open', open);
@@ -418,12 +408,6 @@
         if (use) use.setAttribute('href', '/assets/icons.svg#' + (show ? 'eye-off' : 'eye'));
         return;
       }
-
-      if (t.closest('[data-theme-toggle]')) {
-        var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        try { localStorage.setItem('ac-theme', next); } catch (err) { /* ignora */ }
-      }
     });
 
     document.addEventListener('keydown', function (e) {
@@ -462,7 +446,6 @@
     });
   }
 
-  initTheme();
   initShared();
 
   document.addEventListener('DOMContentLoaded', function () {
