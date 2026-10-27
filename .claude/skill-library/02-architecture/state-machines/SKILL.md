@@ -1,0 +1,39 @@
+---
+name: state-machines
+description: Define estados válidos e transições seguras. Use para checkout, pagamentos, vendas, reserva de estoque, autenticação e workflows.
+---
+
+# state-machines
+
+## Objetivo e acionamento
+Define estados válidos e transições seguras. Use para checkout, pagamentos, vendas, reserva de estoque, autenticação e workflows.
+
+## Contexto e fontes
+1. Respeite CLAUDE.md e AGENTS.md da raiz.
+2. Leia autocaixa/Prompt/PROJECT_CONTEXT.md e consulte autocaixa/Prompt/AGENTS.md para selecionar políticas.
+3. Política primária: autocaixa/Prompt/06_ARQUITETURA_LIMPA.md e autocaixa/Prompt/07_ESTRUTURA_E_PADROES_DE_CODIGO.md.
+4. Abra políticas adicionais somente se o escopo cruzar outros domínios. Não leia todas.
+
+## Procedimento
+1. Liste estados e transições permitidas.
+2. rejeite transições inválidas.
+3. represente pending/approved/declined/failed/unknown conforme o código.
+4. trate timeout como ambíguo.
+5. torne efeitos idempotentes.
+6. reconcilie antes de liberar reservas ou finalizar venda.
+7. teste duplicidade e concorrência.
+
+## Regras específicas do AutoCaixa
+- Aplicação em autocaixa/, PHP + templates HTML/JS/CSS e MySQL/MariaDB via PDO; confirme implementação real antes de editar.
+- A arquitetura documentada inclui app/Core, Controllers, Services, Repositories, Integrations/Payments e Views; mantenha padrões existentes salvo evidência e justificativa.
+- Pagamentos estão simulados nesta fase. Não ative cobrança real nem afirme integração de produção sem verificar código.
+- Valores monetários em centavos; operações de venda/estoque precisam manter consistência, transações e idempotência.
+- Não confie exclusivamente no frontend para preço, permissão ou confirmação de pagamento.
+- Não faça commit, push, deploy, migration destrutiva ou operação externa sem autorização explícita para a ação específica.
+
+## Critérios de conclusão
+- Inspecione diff e arquivos realmente afetados.
+- Execute verificações pertinentes e registre comandos e resultados reais.
+- Separe achados confirmados de hipóteses.
+- Informe arquivos/linhas, riscos residuais e limitações de ambiente.
+- Não declare segurança absoluta, conformidade legal ou prontidão financeira com base em revisão pontual.

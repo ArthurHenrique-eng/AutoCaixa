@@ -1,0 +1,13 @@
+---
+name: clean-code
+description: Mantém código legível, consistente e simples. Use ao implementar ou revisar código novo.
+---
+
+# Skill acionável: clean-code
+
+Leia e siga a definição canônica completa em:
+.claude/skill-library/07-code-quality/clean-code/SKILL.md
+
+Use a ferramenta de leitura de arquivos disponível para abrir esse caminho a partir da raiz do repositório. A definição canônica fornece o procedimento, as políticas e os critérios de conclusão. Não prossiga sem consultá-la.
+
+Aplique somente as partes pertinentes à tarefa, inspecione código real e evite carregar skills adicionais por precaução. Respeite CLAUDE.md, AGENTS.md e as políticas específicas em autocaixa/Prompt/.
