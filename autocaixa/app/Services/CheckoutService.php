@@ -138,7 +138,9 @@ final class CheckoutService
             return $sale['status'];
         }
 
-        if (strtotime((string) $sale['created_at']) <= time() - self::RESERVATION_TTL_SECONDS) {
+        // Compara no relógio do MySQL, o mesmo usado para gravar created_at.
+        // Isso evita expiração prematura quando PHP e MySQL usam fusos horários diferentes.
+        if ((bool) $sale['is_expired']) {
             $this->expireSale($saleId);
             return 'expired';
         }
@@ -246,7 +248,12 @@ final class CheckoutService
 
     private function fetchSale(int $saleId): ?array
     {
-        $stmt = $this->db->prepare('SELECT id, status, total_cents, created_at FROM sales WHERE id = :id');
+        $stmt = $this->db->prepare(
+            'SELECT id, status, total_cents, created_at,
+                    (created_at <= DATE_SUB(NOW(), INTERVAL ' . self::RESERVATION_TTL_SECONDS . ' SECOND)) AS is_expired
+             FROM sales
+             WHERE id = :id'
+        );
         $stmt->execute([':id' => $saleId]);
         return $stmt->fetch() ?: null;
     }
