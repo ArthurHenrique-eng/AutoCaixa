@@ -55,4 +55,4 @@
 ## Decisões pendentes e suposições
 - Integração Cielo para cartão/Pix e webhook serão definidos em fase posterior.
 - A política de estorno automático ainda depende do provedor real.
-- O tempo de reserva de estoque e de inatividade do totem está padronizado em 120 segundos nesta implementação e deve ser revisto se o fluxo operacional exigir outro prazo.
+- **Reserva de pagamento/estoque:** a venda aguarda pagamento por até 300 segundos (5 minutos); após esse prazo, a venda expira e a reserva é liberada. A expiração de sessão/inatividade do totem é uma regra separada e permanece em 120 segundos.
