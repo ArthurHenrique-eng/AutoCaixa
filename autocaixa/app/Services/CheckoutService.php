@@ -20,7 +20,7 @@ use RuntimeException;
 final class CheckoutService
 {
     private const METHODS = ['pix', 'card'];
-    private const RESERVATION_TTL_SECONDS = 120;
+    private const RESERVATION_TTL_SECONDS = 300;
 
     public function __construct(
         private PDO $db,
@@ -229,7 +229,15 @@ final class CheckoutService
     public function externalIdFor(int $saleId): ?string
     {
         $stmt = $this->db->prepare(
-            "SELECT external_id FROM payments WHERE sale_id = :sale AND external_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+            "SELECT p.external_id
+             FROM payments p
+             INNER JOIN sales s ON s.id = p.sale_id
+             WHERE p.sale_id = :sale
+               AND p.external_id IS NOT NULL
+               AND p.status = 'pending'
+               AND s.status = 'awaiting_payment'
+             ORDER BY p.id DESC
+             LIMIT 1"
         );
         $stmt->execute([':sale' => $saleId]);
         $value = $stmt->fetchColumn();
