@@ -228,7 +228,7 @@ test('resultado desconhecido do gateway não marca venda como paga nem libera re
         public function status(string $externalId): string { return 'unknown'; }
     };
     $checkout = new CheckoutService($pdo, $repo, $gateway);
-    assert_throws(fn() => $checkout->start($cart->items(), 'pix'), 'resultado da cobrança não pôde ser confirmado');
+    assert_throws(fn() => $checkout->start($cart->items(), 'pix'), 'Não foi possível confirmar o resultado da cobrança');
     $saleId = (int) $pdo->query('SELECT id FROM sales ORDER BY id DESC LIMIT 1')->fetchColumn();
     assert_true($saleId > 0, 'venda deveria existir para reconciliação');
     assert_true($pdo->query("SELECT status FROM sales WHERE id = $saleId")->fetchColumn() === 'awaiting_payment', 'venda não pode virar falha por timeout ambíguo');

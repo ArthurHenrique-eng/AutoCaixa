@@ -2,8 +2,10 @@
 declare(strict_types=1);
 
 // Aplica apenas migrações ainda não registradas. Uso: php scripts/migrate.php
+// Usa as credenciais de migração (DB_MIGRATION_USER/DB_MIGRATION_PASS), com privilégio de DDL,
+// separadas das credenciais de runtime usadas pela aplicação a cada requisição.
 $config = require dirname(__DIR__) . '/config/config.php';
-$db = $config['db'];
+$db = $config['db_migration'];
 $dsn = sprintf('mysql:host=%s;dbname=%s;charset=%s', $db['host'], $db['name'], $db['charset']);
 $pdo = new PDO($dsn, $db['user'], $db['pass'], [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,

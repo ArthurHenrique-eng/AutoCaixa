@@ -35,7 +35,9 @@ final class AdminController
         $result = Auth::attempt($this->db, $email, $password, Auth::ip());
 
         if ($result === 'ok') {
-            Http::redirect('/admin');
+            $user = Auth::user($this->db);
+            $mustChange = $user !== null && (int) ($user['must_change_password'] ?? 0) === 1;
+            Http::redirect($mustChange ? '/admin/trocar-senha' : '/admin');
             return;
         }
         $message = $result === 'locked'
@@ -50,6 +52,61 @@ final class AdminController
             Auth::logout($this->db);
         }
         Http::redirect('/admin/login');
+    }
+
+    /** Tela obrigatória de troca de senha, para contas com senha provisória. */
+    public function passwordChangeForm(): void
+    {
+        $user = Auth::user($this->db);
+        if ($user === null) {
+            Http::redirect('/admin/login');
+            return;
+        }
+        View::render('admin/change_password', ['user' => $user, 'error' => null]);
+    }
+
+    public function passwordChangeSubmit(): void
+    {
+        $user = Auth::user($this->db);
+        if ($user === null) {
+            Http::redirect('/admin/login');
+            return;
+        }
+        if (!Http::formCsrfOk()) {
+            View::render('admin/change_password', ['user' => $user, 'error' => 'Sessão expirada. Tente novamente.'], 419);
+            return;
+        }
+
+        $current = (string) ($_POST['current_password'] ?? '');
+        $new = (string) ($_POST['new_password'] ?? '');
+        $confirm = (string) ($_POST['new_password_confirmation'] ?? '');
+
+        $stmt = $this->db->prepare('SELECT password_hash FROM users WHERE id = :id');
+        $stmt->execute([':id' => $user['id']]);
+        $hash = (string) $stmt->fetchColumn();
+        if (!password_verify($current, $hash)) {
+            View::render('admin/change_password', ['user' => $user, 'error' => 'Senha atual incorreta.'], 401);
+            return;
+        }
+        if (strlen($new) < 12) {
+            View::render('admin/change_password', ['user' => $user, 'error' => 'A nova senha deve ter pelo menos 12 caracteres.'], 422);
+            return;
+        }
+        if ($new !== $confirm) {
+            View::render('admin/change_password', ['user' => $user, 'error' => 'A confirmação não é igual à nova senha.'], 422);
+            return;
+        }
+        if ($new === $current) {
+            View::render('admin/change_password', ['user' => $user, 'error' => 'A nova senha deve ser diferente da senha atual.'], 422);
+            return;
+        }
+
+        $this->db->prepare('UPDATE users SET password_hash = :h, must_change_password = 0 WHERE id = :id')
+            ->execute([':h' => Auth::hashPassword($new), ':id' => $user['id']]);
+        Audit::log($this->db, (int) $user['id'], 'password_changed', 'user', (string) $user['id'], null, Auth::ip());
+        session_regenerate_id(true);
+        Http::flash('ok', 'Senha alterada com sucesso.');
+        Http::redirect('/admin');
     }
 
     public function dashboard(): void
@@ -107,7 +164,7 @@ final class AdminController
         }
         try {
             $this->db->prepare(
-                'INSERT INTO users (name, email, password_hash, role) VALUES (:n, :e, :h, :r)'
+                'INSERT INTO users (name, email, password_hash, role, must_change_password) VALUES (:n, :e, :h, :r, 1)'
             )->execute([':n' => $name, ':e' => $email, ':h' => Auth::hashPassword($password), ':r' => $role]);
         } catch (\PDOException $e) {
             { $this->back('/admin/usuarios', 'error', 'Já existe um usuário com este e-mail.'); return; }
@@ -141,12 +198,17 @@ final class AdminController
         View::render('admin/audit', ['user' => $user, 'rows' => $rows]);
     }
 
-    /** Exige login e permissão. Retorna o usuário ou null após responder. */
+    /** Exige login, senha definitiva e permissão. Retorna o usuário ou null após responder. */
     public function requireUser(string $permission): ?array
     {
         $user = Auth::user($this->db);
         if ($user === null) {
             Http::redirect('/admin/login');
+            return null;
+        }
+        // Com senha provisória, nenhuma outra rota do painel funciona até a troca.
+        if ((int) ($user['must_change_password'] ?? 0) === 1) {
+            Http::redirect('/admin/trocar-senha');
             return null;
         }
         if (!Permissions::allows($user['role'], $permission)) {

@@ -226,6 +226,7 @@ input::placeholder { color: var(--color-text-muted); opacity: 0.8; }
   border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: var(--space-5);
 }
 .card-flush { padding: 0; overflow: hidden; }
+.card-narrow { max-width: 420px; }
 .card-stack { display: grid; gap: var(--space-3); }
 .card-head {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap;

@@ -190,10 +190,12 @@ final class CheckoutService
             $itemsStmt->execute([':sale' => $saleId]);
             $items = $itemsStmt->fetchAll();
 
+            // Nomes de parâmetro únicos: com emulação de prepares desligada, o driver MySQL
+            // nativo não aceita o mesmo parâmetro nomeado repetido na mesma consulta.
             $decrement = $this->db->prepare(
                 'UPDATE products
-                 SET stock = stock - :qty, reserved_stock = reserved_stock - :qty
-                 WHERE id = :id AND stock >= :qty_check AND reserved_stock >= :qty_check'
+                 SET stock = stock - :qty_stock, reserved_stock = reserved_stock - :qty_reserved
+                 WHERE id = :id AND stock >= :qty_check_stock AND reserved_stock >= :qty_check_reserved'
             );
             $movement = $this->db->prepare(
                 "INSERT INTO stock_movements (product_id, quantity_change, reason, sale_id)
@@ -202,8 +204,10 @@ final class CheckoutService
             foreach ($items as $item) {
                 $qty = (int) $item['quantity'];
                 $decrement->execute([
-                    ':qty' => $qty,
-                    ':qty_check' => $qty,
+                    ':qty_stock' => $qty,
+                    ':qty_reserved' => $qty,
+                    ':qty_check_stock' => $qty,
+                    ':qty_check_reserved' => $qty,
                     ':id' => (int) $item['product_id'],
                 ]);
                 if ($decrement->rowCount() !== 1) {

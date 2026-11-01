@@ -12,4 +12,13 @@ final class Json
         header('Cache-Control: no-store');
         echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
+
+    /**
+     * Formato padrão de erro da API: {"error": {"code": "...", "message": "..."}}.
+     * "message" é sempre um texto seguro para o cliente; detalhes técnicos vão só para o log.
+     */
+    public static function error(string $code, string $message, int $status): void
+    {
+        self::send(['error' => ['code' => $code, 'message' => $message]], $status);
+    }
 }

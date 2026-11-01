@@ -34,13 +34,45 @@ Defina no painel (ou em `.htaccess` com `SetEnv`, sem versionar):
 | Variável | Valor de produção |
 |---|---|
 | `APP_DEBUG` | `false` |
+| `APP_ENV` | `production` |
 | `DB_HOST` | host fornecido pela Hostinger |
 | `DB_NAME` | nome do banco criado |
-| `DB_USER` | usuário dedicado |
+| `DB_USER` | usuário de runtime, dedicado (sem privilégio de DDL — ver abaixo) |
 | `DB_PASS` | senha forte, guardada somente no painel |
+| `DB_MIGRATION_USER` | usuário de migração, só usado por `scripts/migrate.php` |
+| `DB_MIGRATION_PASS` | senha forte, guardada somente no painel |
 | `PAYMENT_DRIVER` | `simulated` até a integração bancária (Fase 4) |
+| `RATE_LIMIT_*` | opcionais; ajustam os limites de requisições (ver abaixo) |
+| `TRUSTED_PROXIES` | normalmente vazio; só preencher se houver um proxy confiável na frente |
 
-**Atenção:** com `PAYMENT_DRIVER=simulated`, o sistema NÃO cobra nada real. Não use em produção para vendas reais enquanto a Fase 4 não for concluída.
+**Atenção:** com `PAYMENT_DRIVER=simulated`, o sistema NÃO cobra nada real. Com `APP_ENV=production` definido, a aplicação **recusa iniciar** se `PAYMENT_DRIVER=simulated` — é a proteção contra publicar o modo simulado em produção por engano. Não defina `APP_ENV=production` enquanto a Fase 4 não estiver concluída com um driver de pagamento real.
+
+### Dois usuários de banco: runtime e migração
+
+Desde a migração 004, o usuário usado pela aplicação a cada requisição (`DB_USER`) não deve ter privilégio de alterar o schema (CREATE, ALTER, INDEX, REFERENCES, DROP). Só `scripts/migrate.php` precisa desse privilégio, através de `DB_MIGRATION_USER`/`DB_MIGRATION_PASS`. Exemplo de criação dos dois usuários:
+
+```sql
+CREATE USER 'autocaixa'@'%' IDENTIFIED BY 'senha-forte-runtime';
+GRANT SELECT, INSERT, UPDATE, DELETE ON autocaixa.* TO 'autocaixa'@'%';
+
+CREATE USER 'autocaixa_migrate'@'%' IDENTIFIED BY 'senha-forte-migracao';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES, DROP ON autocaixa.* TO 'autocaixa_migrate'@'%';
+```
+
+Se `DB_MIGRATION_USER`/`DB_MIGRATION_PASS` não forem definidas, `scripts/migrate.php` usa as mesmas credenciais de `DB_USER`/`DB_PASS` (comportamento anterior, mantido por compatibilidade) — mas nesse caso o usuário de runtime volta a precisar de privilégio de DDL, o que não é recomendado.
+
+### Limites de requisições (rate limiting)
+
+Cada rota sensível (login, carrinho, checkout, e um limite geral para o resto) tem um limite por IP, configurável sem alterar código:
+
+| Variável | Padrão | O que limita |
+|---|---|---|
+| `RATE_LIMIT_LOGIN` / `RATE_LIMIT_LOGIN_WINDOW` | 10 por 60 s | tentativas de login por IP |
+| `RATE_LIMIT_CART` / `RATE_LIMIT_CART_WINDOW` | 120 por 60 s | ações do carrinho por IP+sessão |
+| `RATE_LIMIT_CHECKOUT` / `RATE_LIMIT_CHECKOUT_WINDOW` | 20 por 60 s | início de checkout por IP+sessão |
+| `RATE_LIMIT_PUBLIC` / `RATE_LIMIT_PUBLIC_WINDOW` | 300 por 60 s | limite geral, por IP |
+
+Ao exceder, a resposta vem com HTTP 429 e o cabeçalho `Retry-After`. O contador fica na tabela `rate_limit_hits` (migração 004); não depende de Redis nem de outro serviço externo.
 
 ## Publicação
 

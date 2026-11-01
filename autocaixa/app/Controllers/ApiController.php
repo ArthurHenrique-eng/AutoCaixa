@@ -74,7 +74,7 @@ final class ApiController
     public function saleStatus(int $saleId): void
     {
         if (!$this->owns($saleId)) {
-            Json::send(['error' => 'Venda não encontrada.'], 404);
+            Json::error('SALE_NOT_FOUND', 'Venda não encontrada.', 404);
             return;
         }
         $this->run(function () use ($saleId) {
@@ -92,11 +92,11 @@ final class ApiController
     {
         $this->guardPost();
         if (!$this->owns($saleId)) {
-            Json::send(['error' => 'Venda não encontrada.'], 404);
+            Json::error('SALE_NOT_FOUND', 'Venda não encontrada.', 404);
             return;
         }
         if (!$this->gateway instanceof SimulatedPaymentGateway) {
-            Json::send(['error' => 'Recurso indisponível.'], 404);
+            Json::error('FEATURE_DISABLED', 'Recurso indisponível.', 404);
             return;
         }
         $this->run(function () use ($saleId) {
@@ -113,13 +113,15 @@ final class ApiController
         try {
             $action();
         } catch (DomainException $e) {
-            Json::send(['error' => $e->getMessage()], 422);
+            // Mensagem de regra de negócio, já pensada para o cliente (ex.: "Estoque insuficiente").
+            Json::error('VALIDATION_ERROR', $e->getMessage(), 422);
         } catch (RuntimeException $e) {
+            // Mensagem operacional controlada (ex.: "Não tente pagar novamente"), não é detalhe interno.
             error_log('[AutoCaixa] ' . $e->getMessage());
-            Json::send(['error' => $e->getMessage()], 503);
+            Json::error('SERVICE_UNAVAILABLE', $e->getMessage(), 503);
         } catch (\Throwable $e) {
             error_log('[AutoCaixa] ' . $e->getMessage());
-            Json::send(['error' => 'Erro interno. Chame um funcionário.'], 500);
+            Json::error('INTERNAL_ERROR', 'Erro interno. Chame um funcionário.', 500);
         }
     }
 
@@ -127,7 +129,7 @@ final class ApiController
     {
         $header = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
         if (!Csrf::validate($header)) {
-            Json::send(['error' => 'Requisição inválida. Recarregue a página.'], 419);
+            Json::error('CSRF_INVALID', 'Requisição inválida. Recarregue a página.', 419);
             exit;
         }
     }

@@ -74,6 +74,14 @@
     btn.disabled = false;
   }
 
+  /* A API responde erros como {"error":{"code":"...","message":"..."}}. */
+  function apiErrorMessage(r, fallback) {
+    var err = r && r.data && r.data.error;
+    if (err && typeof err === 'object' && err.message) return err.message;
+    if (typeof err === 'string' && err) return err;
+    return fallback;
+  }
+
   function api(path, body) {
     var opts = {
       method: body === undefined ? 'GET' : 'POST',
@@ -188,7 +196,7 @@
           toast('Produto adicionado.');
           refreshCart();
         } else {
-          setFeedback(feedback, r.data.error || 'Não foi possível adicionar o produto.', 'error');
+          setFeedback(feedback, apiErrorMessage(r, 'Não foi possível adicionar o produto.'), 'error');
         }
         scanner.focus();
       });
@@ -214,7 +222,7 @@
           setFeedback(feedback, '', '');
           if (action === 'remove') toast('Produto removido.');
         } else {
-          setFeedback(feedback, r.data.error || 'Operação não permitida.', 'error');
+          setFeedback(feedback, apiErrorMessage(r, 'Operação não permitida.'), 'error');
         }
         refreshCart();
       });
@@ -230,7 +238,7 @@
             window.location.href = r.data.redirect;
           } else {
             stopLoading(btn);
-            setFeedback(feedback, r.data.error || 'Não foi possível iniciar o pagamento.', 'error');
+            setFeedback(feedback, apiErrorMessage(r, 'Não foi possível iniciar o pagamento.'), 'error');
             refreshCart();
           }
         });
@@ -270,7 +278,7 @@
       if (!polling) return;
       api('/api/vendas/' + saleId + '/status').then(function (r) {
         if (!r.ok) {
-          setFeedback(feedback, r.data.error || 'Não foi possível verificar o pagamento.', 'error');
+          setFeedback(feedback, apiErrorMessage(r, 'Não foi possível verificar o pagamento.'), 'error');
         } else if (r.data.status === 'paid') {
           polling = false;
           setFeedback(feedback, '', '');
@@ -297,7 +305,7 @@
         api('/api/vendas/' + saleId + '/simular-aprovacao', {}).then(function (r) {
           if (!r.ok) {
             stopLoading(simulate);
-            setFeedback(feedback, r.data.error || 'Simulação indisponível.', 'error');
+            setFeedback(feedback, apiErrorMessage(r, 'Simulação indisponível.'), 'error');
           }
         });
       });
