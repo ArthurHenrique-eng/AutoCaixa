@@ -243,11 +243,12 @@ test('venda pendente expira e libera a reserva após o prazo', function (PDO $pd
     $gateway = new SimulatedPaymentGateway($pdo);
     $checkout = new CheckoutService($pdo, $repo, $gateway);
     $result = $checkout->start($cart->items(), 'pix');
-    $pdo->exec("UPDATE sales SET created_at = DATE_SUB(NOW(), INTERVAL 121 SECOND) WHERE id = {$result['sale_id']}");
+    $pdo->exec("UPDATE sales SET created_at = DATE_SUB(NOW(), INTERVAL 301 SECOND) WHERE id = {$result['sale_id']}");
 
     assert_true($checkout->refresh($result['sale_id']) === 'expired', 'venda deveria expirar');
     assert_true(reserved_of($pdo, '100') === 0, 'reserva deveria ser liberada após expiração');
     assert_true(stock_of($pdo, '100') === 10, 'estoque físico não deve mudar na expiração');
+    assert_true($checkout->externalIdFor($result['sale_id']) === null, 'venda expirada não deve disponibilizar cobrança para aprovação');
 });
 
 echo "\n" . count($failed) . " falha(s), $passed aprovado(s)\n";
