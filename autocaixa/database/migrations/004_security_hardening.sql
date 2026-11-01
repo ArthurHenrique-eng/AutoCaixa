@@ -2,7 +2,7 @@
 -- Senha provisória (obriga troca no primeiro acesso) e contador para o limitador de requisições.
 
 ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER password_hash;
+    ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER password_hash;
 
 -- Contador de requisições por "bucket" (rota + ator) e janela fixa. Ver App\Core\RateLimiter.
 CREATE TABLE IF NOT EXISTS rate_limit_hits (
