@@ -265,7 +265,8 @@
     var labels = {
       awaiting_payment: 'Aguardando pagamento...',
       paid: 'Pagamento aprovado',
-      failed: 'Pagamento não aprovado'
+      failed: 'Pagamento não aprovado',
+      expired: 'Prazo de pagamento encerrado'
     };
 
     function setState(state, text, hintText) {
@@ -291,6 +292,12 @@
           if (simulate) simulate.hidden = true;
           setState('failed', labels.failed, 'Nenhuma cobrança foi concluída. Volte ao carrinho para tentar de novo ou chame um funcionário.');
           return;
+        } else if (r.data.status === 'expired') {
+          polling = false;
+          if (simulate) simulate.hidden = true;
+          setFeedback(feedback, 'O prazo desta cobrança terminou. Volte ao carrinho para iniciar uma nova compra.', 'error');
+          setState('expired', labels.expired, 'A reserva de estoque foi liberada. Nenhum pagamento foi confirmado.');
+          return;
         } else {
           setFeedback(feedback, '', '');
           setState('waiting', labels.awaiting_payment);
@@ -304,9 +311,10 @@
         startLoading(simulate, 'Aprovando...');
         api('/api/vendas/' + saleId + '/simular-aprovacao', {}).then(function (r) {
           if (!r.ok) {
-            stopLoading(simulate);
             setFeedback(feedback, apiErrorMessage(r, 'Simulação indisponível.'), 'error');
           }
+        }).finally(function () {
+          stopLoading(simulate);
         });
       });
     }
