@@ -40,11 +40,12 @@ final class SimulatedPaymentGateway implements PaymentGateway
     }
 
     /** Ação exclusiva da simulação, para demonstrar o fluxo sem cobrança real. */
-    public function simulateApproval(string $externalId): void
+    public function simulateApproval(string $externalId): bool
     {
         $stmt = $this->db->prepare(
             "UPDATE simulated_charges SET status = 'approved' WHERE external_id = :id AND status = 'pending'"
         );
         $stmt->execute([':id' => $externalId]);
+        return $stmt->rowCount() === 1;
     }
 }
