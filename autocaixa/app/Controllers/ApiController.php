@@ -101,8 +101,9 @@ final class ApiController
         }
         $this->run(function () use ($saleId) {
             $externalId = $this->checkout->externalIdFor($saleId);
-            if ($externalId !== null) {
-                $this->gateway->simulateApproval($externalId);
+            if ($externalId === null || !$this->gateway->simulateApproval($externalId)) {
+                Json::error('PAYMENT_NOT_PENDING', 'Esta cobrança não está mais aguardando aprovação.', 409);
+                return;
             }
             Json::send(['sale_id' => $saleId, 'simulated' => true]);
         });
